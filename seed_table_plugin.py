@@ -16,15 +16,19 @@ from angrmanagement.plugins import BasePlugin
 from angrmanagement.ui.views import BaseView
 from angrmanagement.ui.workspace import Workspace
 
+from .seed_table import SeedTable
+
 
 class SeedTableModel(QAbstractTableModel):
     def __init__(self, workspace, table, dropdown):
         super(SeedTableModel, self).__init__()
+        seed_table = SeedTable(workspace, seed_callback=self.add_seed)
+
         self.table = table
         self.workspace = workspace
         self.page_dropdown = dropdown
-        self.headers = ["ID", "Input", "U", "NT", "NC", "C", "L", "E", "M"]
-        self.seeds = list(range(1000))
+        self.headers = ["ID", "Input", "NC", "C", "NT", "L", "E"]
+        self.seeds = seed_table.get_all_seeds()
         self.displayed_seeds = []
 
         # pagination support
@@ -90,9 +94,19 @@ class SeedTableModel(QAbstractTableModel):
         seed = self.displayed_seeds[index.row()]
         if role == Qt.DisplayRole:
             if col == 0:
-                return f"ID{index.row()}"
+                return f"ID{index.row() + ((self.current_page-1)*(self.entries_per_page - 1))}"
             elif col == 1:
-                return f"SEED{seed}"
+                return str(seed.value)[:10]
+            elif col == 2 and "non-crashing" in seed.tags:
+                return "x"
+            elif col == 3 and "crashing" in seed.tags:
+                return "x"
+            elif col == 4 and "non-terminating" in seed.tags:
+                return "x"
+            elif col == 5 and "leaking" in seed.tags:
+                return "x"
+            elif col == 6 and "exploit" in seed.tags:
+                return "x"
             return None
         return None
 
