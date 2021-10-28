@@ -22,13 +22,13 @@ from .seed_table import SeedTable
 class SeedTableModel(QAbstractTableModel):
     def __init__(self, workspace, table, dropdown):
         super(SeedTableModel, self).__init__()
-        seed_table = SeedTable(workspace, seed_callback=self.add_seed)
+        self.seed_table = SeedTable(workspace, seed_callback=self.add_seed)
 
         self.table = table
         self.workspace = workspace
         self.page_dropdown = dropdown
         self.headers = ["ID", "Input", "NC", "C", "NT", "L", "E"]
-        self.seeds = seed_table.get_all_seeds()
+        self.seeds = []
         self.displayed_seeds = []
 
         # pagination support
@@ -92,11 +92,11 @@ class SeedTableModel(QAbstractTableModel):
     def data(self, index, role=Qt.DisplayRole):
         col = index.column()
         seed = self.displayed_seeds[index.row()]
-        if role == Qt.DisplayRole and not isinstance(seed, str):
+        if role == Qt.DisplayRole:
             if col == 0:
                 return f"ID{index.row() + ((self.current_page-1)*(self.entries_per_page - 1))}"
             elif col == 1:
-                return str(seed.value)
+                return repr(seed.value) if len(seed.value) < 60 else repr(seed.value[:60] + b"...")
             elif col == 2 and "non-crashing" in seed.tags:
                 return "x"
             elif col == 3 and "crashing" in seed.tags:
@@ -176,8 +176,6 @@ class SeedTableView(BaseView):
         self.table.setModel(self.table_data)
         self.table.init_parameters()  # need to set table model before messing with column resizing
         self.container.layout().addWidget(self.table)
-
-        self.table_data.add_seed("test")
 
         # create bottom section
         self.bottom_widget = QWidget()
