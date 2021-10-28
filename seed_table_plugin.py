@@ -92,11 +92,11 @@ class SeedTableModel(QAbstractTableModel):
     def data(self, index, role=Qt.DisplayRole):
         col = index.column()
         seed = self.displayed_seeds[index.row()]
-        if role == Qt.DisplayRole:
+        if role == Qt.DisplayRole and not isinstance(seed, str):
             if col == 0:
                 return f"ID{index.row() + ((self.current_page-1)*(self.entries_per_page - 1))}"
             elif col == 1:
-                return str(seed.value)[:10]
+                return str(seed.value)
             elif col == 2 and "non-crashing" in seed.tags:
                 return "x"
             elif col == 3 and "crashing" in seed.tags:
