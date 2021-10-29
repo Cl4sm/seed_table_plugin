@@ -1,4 +1,6 @@
-from PySide2.QtCore import Qt, QAbstractTableModel, QModelIndex
+import time
+
+from PySide2.QtCore import Qt, QAbstractTableModel, QModelIndex, QEvent
 from PySide2.QtWidgets import (
     QVBoxLayout,
     QMainWindow,
@@ -9,21 +11,22 @@ from PySide2.QtWidgets import (
     QHBoxLayout,
     QComboBox,
     QLabel,
-    QPushButton,
+    QPushButton, QLineEdit, QCheckBox,
 )
 
 from angrmanagement.plugins import BasePlugin
 from angrmanagement.ui.views import BaseView
 from angrmanagement.ui.workspace import Workspace
+import codecs
 
 from .seed_table import SeedTable
 
 
 class SeedTableModel(QAbstractTableModel):
-    def __init__(self, workspace, table, dropdown):
+    def __init__(self, workspace, table, dropdown, countlabel):
         super(SeedTableModel, self).__init__()
-        self.seed_table = SeedTable(workspace, seed_callback=self.add_seed)
-
+        self.seed_db = SeedTable(workspace, seed_callback=self.add_seed)
+        self.countlabel = countlabel
         self.table = table
         self.workspace = workspace
         self.page_dropdown = dropdown
@@ -83,20 +86,31 @@ class SeedTableModel(QAbstractTableModel):
         else:
             self.seeds.append(seed)
         # update our page
-        self.max_pages = (len(self.seeds) // self.entries_per_page) + 1
+        self.max_pages = (len(self.seeds) // self.entries_per_page)
         self.set_page(self.current_page)
         self.page_dropdown.clear()
-        self.page_dropdown.addItems(list(map(str, range(1, self.max_pages))))
+        self.page_dropdown.addItems(list(map(str, range(1, self.max_pages+1))))
+        self.countlabel.setText("Count: " + str(len(self.seeds)))
+        self.endResetModel()
+
+    def clear_seeds(self):
+        self.beginResetModel()
+        self.seeds = []
+        self.max_pages = (len(self.seeds) // self.entries_per_page)
+        self.set_page(self.current_page)
+        self.page_dropdown.clear()
+        self.page_dropdown.addItems(list(map(str, range(1, self.max_pages+1))))
+        self.countlabel.setText("Count: " + str(len(self.seeds)))
         self.endResetModel()
 
     def data(self, index, role=Qt.DisplayRole):
         col = index.column()
         seed = self.displayed_seeds[index.row()]
-        if role == Qt.DisplayRole:
+        if role == Qt.DisplayRole and not isinstance(seed, str):
             if col == 0:
-                return f"ID{index.row() + ((self.current_page-1)*(self.entries_per_page - 1))}"
+                return seed.id
             elif col == 1:
-                return repr(seed.value) if len(seed.value) < 60 else repr(seed.value[:60] + b"...")
+                return repr(seed.value[:80] + "...")  # repr to display bytes
             elif col == 2 and "non-crashing" in seed.tags:
                 return "x"
             elif col == 3 and "crashing" in seed.tags:
@@ -121,14 +135,14 @@ class SeedTableModel(QAbstractTableModel):
     def go_next_page(self):
         if self.set_page(self.current_page + 1):
             self.page_dropdown.clear()
-            self.page_dropdown.addItems(list(map(str, range(1, self.max_pages))))
+            self.page_dropdown.addItems(list(map(str, range(1, self.max_pages+1))))
             self.page_dropdown.setCurrentIndex(self.current_page - 1)
 
     def go_prev_page(self):
         if self.set_page(self.current_page - 1):
             self.page_dropdown.clear()
-            self.page_dropdown.addItems(list(map(str, range(1, self.max_pages))))
-            self.page_dropdown.setCurrentIndex(self.current_page-1)
+            self.page_dropdown.addItems(list(map(str, range(1, self.max_pages+1))))
+            self.page_dropdown.setCurrentIndex(self.current_page - 1)
 
 
 class SeedTableWidget(QTableView):
@@ -161,7 +175,7 @@ class SeedTableView(BaseView):
         self._init_widgets()
 
     def page_changed(self, i):
-        self.table_data.set_page(self.page_dropdown.currentIndex()+1)
+        self.table_data.set_page(self.page_dropdown.currentIndex() + 1)
 
     def _init_widgets(self):
         self.main = QMainWindow()
@@ -169,10 +183,14 @@ class SeedTableView(BaseView):
 
         self.container = QWidget()  # create containing widget to keep things nice
         self.container.setLayout(QVBoxLayout())
+
+        # count label
+        self.seed_count_label = QLabel("Count:")
+
         # create table
         self.page_dropdown = QComboBox()
         self.table = SeedTableWidget(self, self.workspace)
-        self.table_data = SeedTableModel(self.workspace, self.table, self.page_dropdown)
+        self.table_data = SeedTableModel(self.workspace, self.table, self.page_dropdown, self.seed_count_label)
         self.table.setModel(self.table_data)
         self.table.init_parameters()  # need to set table model before messing with column resizing
         self.container.layout().addWidget(self.table)
@@ -187,13 +205,42 @@ class SeedTableView(BaseView):
         self.prev_page_btn = QPushButton("<")
         self.prev_page_btn.setMaximumWidth(40)
         self.prev_page_btn.clicked.connect(self.table_data.go_prev_page)
+        # page label
         self.page_label = QLabel("Page:")
         # page dropdown
-        self.page_dropdown.addItems(list(map(str, range(1,1))))  # test
+        self.page_dropdown.addItems(list(map(str, range(1, 1))))  # test
         self.page_dropdown.setCurrentIndex(0)
         self.page_dropdown.activated.connect(self.page_changed)
+        # filter box
+        self.filter_box = SeedTableFilterBox(self)
+        self.filter_box.returnPressed.connect(self._on_filter_change)
+        # filter checkboxes
+        # "NC", "C", "NT", "L", "E"
+        self.nc_checkbox = QCheckBox("NC")
+        self.nc_checkbox.setChecked(True)
+        self.nc_checkbox.stateChanged.connect(self._on_filter_change)
+        self.c_checkbox = QCheckBox("C")
+        self.c_checkbox.setChecked(True)
+        self.c_checkbox.stateChanged.connect(self._on_filter_change)
+        self.nt_checkbox = QCheckBox("NT")
+        self.nt_checkbox.setChecked(True)
+        self.nt_checkbox.stateChanged.connect(self._on_filter_change)
+        self.l_checkbox = QCheckBox("L")
+        self.l_checkbox.setChecked(True)
+        self.l_checkbox.stateChanged.connect(self._on_filter_change)
+        self.e_checkbox = QCheckBox("E")
+        self.e_checkbox.setChecked(True)
+        self.e_checkbox.stateChanged.connect(self._on_filter_change)
 
-        self.bottom_widget.layout().addStretch()
+
+        self.bottom_widget.layout().addWidget(self.seed_count_label)
+        self.bottom_widget.layout().addWidget(self.filter_box)
+        self.bottom_widget.layout().addWidget(self.nc_checkbox)
+        self.bottom_widget.layout().addWidget(self.c_checkbox)
+        self.bottom_widget.layout().addWidget(self.nt_checkbox)
+        self.bottom_widget.layout().addWidget(self.l_checkbox)
+        self.bottom_widget.layout().addWidget(self.e_checkbox)
+        # self.bottom_widget.layout().addStretch()
         self.bottom_widget.layout().addWidget(self.prev_page_btn)
         self.bottom_widget.layout().addWidget(self.page_label)
         self.bottom_widget.layout().addWidget(self.page_dropdown)
@@ -210,7 +257,50 @@ class SeedTableView(BaseView):
         if self.instance.project.am_none:
             return
         pass
+        #self.table_data.seeds = self.table_data.seed_db.get_all_seeds()
 
+    def _on_filter_change(self):
+        raw_filter = self.filter_box.text()
+        if len(raw_filter) > 0:
+            inp, _ = codecs.escape_decode(raw_filter, 'hex')
+            print(f"Query: {repr(inp)}")
+        flags = []
+        if self.nc_checkbox.isChecked():
+            flags.append("non-crashing")
+        if self.c_checkbox.isChecked():
+            flags.append("crashing")
+        if self.l_checkbox.isChecked():
+            flags.append("leaking")
+        if self.nt_checkbox.isChecked():
+            flags.append("non-terminating")
+        if self.e_checkbox.isChecked():
+            flags.append("exploit")
+
+        self.table_data.clear_seeds()
+        data = self.table_data.seed_db.get_all_seeds() #query db here
+        self.table_data.add_seed(data)
+
+
+
+
+
+class SeedTableFilterBox(QLineEdit):
+    def __init__(self, parent):
+        super().__init__()
+
+        self._table = parent
+
+        self.installEventFilter(self)
+
+    def eventFilter(self, obj, event):  # pylint:disable=unused-argument
+        if event.type() == QEvent.KeyPress:
+            if event.key() == Qt.Key_Escape:
+                if self.text():
+                    # clear the text
+                    self.setText("")
+                return True
+
+        return False
 
 class SeedTablePlugin(BasePlugin):
     """
@@ -222,3 +312,6 @@ class SeedTablePlugin(BasePlugin):
         self.seed_table_view = SeedTableView(workspace, "center")
         workspace.default_tabs += [self.seed_table_view]
         workspace.add_view(self.seed_table_view)
+        #TODO: move this
+        self.seed_table_view.table_data.add_seed(self.seed_table_view.table_data.seed_db.get_all_seeds())
+
