@@ -1,6 +1,6 @@
 import time
 
-from PySide2.QtCore import Qt, QAbstractTableModel, QModelIndex, QEvent
+from PySide2.QtCore import Qt, QAbstractTableModel, QModelIndex, QEvent, Signal, QObject
 from PySide2.QtGui import QCursor
 from PySide2.QtWidgets import (
     QVBoxLayout,
@@ -21,14 +21,17 @@ from angrmanagement.ui.workspace import Workspace
 import codecs
 
 from .seed_table import SeedTable
-from ...logic import GlobalInfo
-from ...ui.menus.menu import Menu
 
+class querySignaler(QObject):
+    querySignal = Signal(bool)
 
 class SeedTableModel(QAbstractTableModel):
+
     def __init__(self, workspace, table, dropdown, countlabel):
         super(SeedTableModel, self).__init__()
-        self.seed_db = SeedTable(workspace, seed_callback=self.add_seed)
+        self.query_signal = querySignaler()
+        self.query_signal.querySignal.connect(self.querySignalHandle)
+        self.seed_db = SeedTable(workspace, self.query_signal, seed_callback=self.add_seed)
         self.countlabel = countlabel
         self.table = table
         self.workspace = workspace
@@ -52,6 +55,10 @@ class SeedTableModel(QAbstractTableModel):
     def columnCount(self, index=QModelIndex()):
         return len(self.headers)
 
+    def querySignalHandle(self, status):
+        if status:
+            self.countlabel.setText("<font color=#ff0000>Querying..</font>")
+            self.countlabel.repaint()
     # probably not useful anymore. kept for not wanting to do it again.
     # def canFetchMore(self, index=QModelIndex()):
     #     return len(self.seeds) > self.num_loaded
@@ -294,8 +301,6 @@ class SeedTableView(BaseView):
         if self.e_checkbox.isChecked():
             flags.append("exploit")
 
-        self.seed_count_label.setText("<font color=#ff0000>Querying..</font>")
-        self.seed_count_label.repaint()
         self.table_data.clear_seeds()
         if len(flags) == 0 and inp is None:
             data = self.table_data.seed_db.get_all_seeds()
@@ -336,6 +341,4 @@ class SeedTablePlugin(BasePlugin):
         self.seed_table_view = SeedTableView(workspace, "center")
         workspace.default_tabs += [self.seed_table_view]
         workspace.add_view(self.seed_table_view)
-        #TODO: move this
-       # self.seed_table_view.table_data.add_seed(self.seed_table_view.table_data.seed_db.get_all_seeds())
 

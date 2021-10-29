@@ -24,13 +24,15 @@ class SeedTable:
     """
     Multiple POIs
     """
+    query_signal = None
 
-    def __init__(self, workspace, seed_callback=None):
+    def __init__(self, workspace, query_signal, seed_callback=None):
         self.workspace = workspace
         self.seed_callback = seed_callback
         self.connector = None
         self.slacrs_instance = None
         self.should_exit = False
+        self.query_signal = query_signal
 
         self.init_instance()
         self.has_populated_seeds = False
@@ -112,6 +114,7 @@ class SeedTable:
         return seeds
 
     def get_all_seeds(self, filter=None):
+        self.query_signal.querySignal.emit(True)
         session = self.slacrs_instance.session()
         seeds: List[Seed] = []
         if session:
