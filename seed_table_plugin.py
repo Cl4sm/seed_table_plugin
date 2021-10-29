@@ -1,6 +1,7 @@
 import time
 
 from PySide2.QtCore import Qt, QAbstractTableModel, QModelIndex, QEvent
+from PySide2.QtGui import QCursor
 from PySide2.QtWidgets import (
     QVBoxLayout,
     QMainWindow,
@@ -11,7 +12,7 @@ from PySide2.QtWidgets import (
     QHBoxLayout,
     QComboBox,
     QLabel,
-    QPushButton, QLineEdit, QCheckBox,
+    QPushButton, QLineEdit, QCheckBox, QMenu, QFileDialog,
 )
 
 from angrmanagement.plugins import BasePlugin
@@ -20,6 +21,8 @@ from angrmanagement.ui.workspace import Workspace
 import codecs
 
 from .seed_table import SeedTable
+from ...logic import GlobalInfo
+from ...ui.menus.menu import Menu
 
 
 class SeedTableModel(QAbstractTableModel):
@@ -150,7 +153,6 @@ class SeedTableWidget(QTableView):
     def __init__(self, parent, workspace):
         super().__init__(parent)
         self.workspace = workspace
-        self._context_menu = None  # for now
 
     def refresh(self):
         self.viewport().update()
@@ -164,6 +166,26 @@ class SeedTableWidget(QTableView):
         self.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
         self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+
+    def contextMenuEvent(self, event:'PySide2.QtGui.QContextMenuEvent') -> None:
+        rows = self.selectionModel().selectedIndexes()
+        contextMenu = QMenu(self)
+        saveSeed = contextMenu.addAction("&Save Seed")
+        action = contextMenu.exec_(QCursor.pos())
+        if action == saveSeed:
+            self.saveSeed(rows)
+
+    def saveSeed(self, rows):
+        data = self.model().displayed_seeds[rows[0].row()].value
+        options = QFileDialog.Options()
+        options |= QFileDialog.DontUseNativeDialog
+        filename = QFileDialog.getSaveFileName(self, "Save Seed", "", "All Files(*)", options=options)[0]
+        try:
+            with open(filename, "wb") as outfile:
+                outfile.write(data)
+        except:
+            self.workspace.log("Error saving seed.")
+
 
 
 class SeedTableView(BaseView):
