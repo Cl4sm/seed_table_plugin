@@ -92,6 +92,7 @@ class SeedTable:
                 session.close()
 
     def filter_seeds_by_value(self, value: bytes):
+        self.query_signal.querySignal.emit(True)
         session = self.slacrs_instance.session()
         seeds: List[Seed] = []
         if session:
@@ -103,6 +104,7 @@ class SeedTable:
         return seeds
 
     def filter_seeds_by_tag(self, tags: List[str]=[]) -> List[Seed]:
+        self.query_signal.querySignal.emit(True)
         session = self.slacrs_instance.session()
         seeds: List[Seed] = []
         if session:
