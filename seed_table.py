@@ -12,11 +12,17 @@ except ImportError as ex:
     Slacrs = None
 
 class Seed:
+    # def __init__(self, seed: Input):
+    #     self.created_at = seed.created_at
+    #     self.tags = [x.value for x in seed.tags]
+    #     self.value = seed.value
+    #     self.id = "test"
+    def __init__(self, created, tags, value, id):
+        self.created_at = created
+        self.tags = tags
+        self.value = value
+        self.id = hex(id)[2:].rjust(8, "0")
 
-    def __init__(self, seed: Input):
-        self.created_at = seed.created_at
-        self.tags = [x.value for x in seed.tags]
-        self.value = seed.value
 
 
 class SeedTable:
@@ -30,12 +36,10 @@ class SeedTable:
         self.connector = None
         self.slacrs_instance = None
         self.should_exit = False
+        self.current_seed_id = 1
 
         self.init_instance()
-
-        self.slacrs_thread = threading.Thread(target=self.listen_for_events)
-        self.slacrs_thread.setDaemon(True)
-        self.slacrs_thread.start()
+        
 
 
     def init_instance(self):
@@ -51,42 +55,53 @@ class SeedTable:
             self.workspace.log("Unable to retrieve Slacrs instance")
             return False
 
+        self.slacrs_thread = threading.Thread(target=self.listen_for_events)
+        self.slacrs_thread.setDaemon(True)
+        self.slacrs_thread.start()
+
         return True
 
 
     def listen_for_events(self):
         asyncio.set_event_loop_policy(AnyThreadEventLoopPolicy())
-        while not self.connector:
-            self.connector = self.workspace.plugins.get_plugin_instance_by_name("ChessConnector")
-            sleep(1)
-
-        while not self.slacrs_instance:
-            self.slacrs_instance = self.connector.slacrs_instance()
-            sleep(1)
-
-        while not self.connector.target_image_id:
-            sleep(1)
-
-        self.seed_callback(self.get_all_seeds())
-
         while not self.should_exit:
             new_event_count = self.slacrs_instance.fetch_events()
             for _ in range(new_event_count):
                 e = self.slacrs_instance.event_queue.get_nowait()
                 session = self.slacrs_instance.session()
                 obj = e.get_object(session)
-                if isinstance(obj, Input) and obj.target_image_id == self.connector.target_image_id:
+                if isinstance(obj, Input):
                     seed = Seed(obj)
                     self.seed_callback(seed)
 
     def get_all_seeds(self):
-        session = self.slacrs_instance.session()
-        seeds: List[Seed] = []
-        if session:
-            result = session.query(Input).filter_by(target_image_id=self.connector.target_image_id).all()
-            seeds = sorted([Seed(x) for x in result], key=lambda x: x.created_at)
-            session.close()
-        if len(seeds) == 0:
-            self.workspace.log("Unable to retrieve seeds for target_image_id: %s" % connector.target_image_id)
-
+        #BEGIN TESTING CODE
+        from string import ascii_letters
+        import random
+        seed_types = [
+            "non-crashing",
+            "crashing",
+            "leaking",
+            "non-terminating",
+            "exploit",
+        ]
+        seeds = []
+        for i in range(1000):
+            seeds.append(Seed("date", random.choices(seed_types,k=random.randint(1,5)), "".join(random.choices(ascii_letters, k=random.randint(1000,2000))), self.current_seed_id))
+            self.current_seed_id += 1 #TODO: fix this count always increasing,
         return seeds
+        #END TESTING CODE
+
+        # if self.slacrs_instance is None:
+        #     self.workspace.log("Unable to retrieve Slacrs instance")
+        #     return []
+        # session = self.slacrs_instance.session()
+        # seeds: List[Seed] = None
+        # if session:
+        #     result = session.query(Input).filter_by(target_image_id=self.connector.target_image_id).all()
+        #     seeds = sorted([Seed(x) for x in result], key=lambda x: x.created_at)
+        #     session.close()
+        # if seeds is None:
+        #     self.workspace.log("Unable to retrieve seeds for target_image_id: %s" % self.connector.target_image_id)
+        #
+        # return seeds
