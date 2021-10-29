@@ -106,11 +106,11 @@ class SeedTableModel(QAbstractTableModel):
     def data(self, index, role=Qt.DisplayRole):
         col = index.column()
         seed = self.displayed_seeds[index.row()]
-        if role == Qt.DisplayRole and not isinstance(seed, str):
+        if role == Qt.DisplayRole:
             if col == 0:
                 return seed.id
             elif col == 1:
-                return repr(seed.value[:80] + "...")  # repr to display bytes
+                return repr(seed.value) if len(seed.value) < 80 else repr(seed.value[:80] + b"...")
             elif col == 2 and "non-crashing" in seed.tags:
                 return "x"
             elif col == 3 and "crashing" in seed.tags:
