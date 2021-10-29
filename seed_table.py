@@ -17,6 +17,7 @@ class Seed:
         self.created_at = seed.created_at
         self.tags: List[str] = [x.value for x in seed.tags]
         self.value: bytes = seed.value
+        self._realid = seed.id
         self.id: str = hex(id)[2:].rjust(8, "0")
 
 class SeedTable:
@@ -80,6 +81,17 @@ class SeedTable:
                         seed = session.query(Input).filter_by(obj.object_id).one()
                         self.seed_callback(seed)
                 session.close()
+
+    def filter_seeds_by_value(self, value: bytes):
+        session = self.slacrs_instance.session()
+        seeds: List[Seed] = []
+        if session:
+            query = str(session.query(Input.id))
+            query += f"\nWHERE POSITION('\\x{value.hex()}'::bytea in input.value) != 0\nORDER BY input.created_at"
+            result = session.execute(query)
+            seeds = [Seed(session.query(Input).filter_by(id=s_id[0]).first(), idx) for idx, s_id in enumerate(result)]
+            session.close()
+        return seeds
 
     def filter_seeds_by_tag(self, tags: List[str]=[]) -> List[Seed]:
         session = self.slacrs_instance.session()

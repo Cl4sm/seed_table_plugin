@@ -300,7 +300,11 @@ class SeedTableView(BaseView):
         if len(flags) == 0 and inp is None:
             data = self.table_data.seed_db.get_all_seeds()
         else:
-            data = self.table_data.seed_db.filter_seeds_by_tag(tags=flags)
+            if inp:
+                data = self.table_data.seed_db.filter_seeds_by_value(inp)
+                data = list(filter(lambda s: all([x in s.tags for x in flags]), data))
+            else:
+                data = self.table_data.seed_db.filter_seeds_by_tag(tags=flags)
         self.table_data.add_seed(data)
 
 
