@@ -1,5 +1,7 @@
 import logging
+import random
 import sqlalchemy
+import string
 
 from time import sleep
 
@@ -72,10 +74,13 @@ try:
     target = Target(name="hamlin", challenge_id=challenge.id)
     push_to_db(target)
 
+    #image_id = "39baf944-49bc-41cb-86c8-c691de98ed97"
     target_image = TargetImage(
+        #id=image_id,
         name="localhost:5010/ta3_hamlin", target_id=target.id
     )
     push_to_db(target_image)
+
 
     inp = Input(value=b"a" * 100, target_image_id=target_image.id)
     push_to_db(inp)
@@ -90,10 +95,11 @@ try:
 
     # Add many large input cases
     for i in range(200):
-        inp = Input(value=b"X" * 100000, target_image_id=target_image.id)
+        inp = Input(value=''.join(random.choices(string.printable, k=10000)).encode(), target_image_id=target_image.id)
         push_to_db(inp)
-        inp_tag = InputTag(value="non-crashing", input_id=inp.id)
-        push_to_db(inp_tag)
+        for val in random.choices(seed_types, k=random.randint(1,len(seed_types))):
+            inp_tag = InputTag(value=val, input_id=inp.id)
+            push_to_db(inp_tag)
 
     # Add some manually provided input cases
     for i in range(20):

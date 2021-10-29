@@ -7,23 +7,17 @@ from tornado.platform.asyncio import AnyThreadEventLoopPolicy
 
 try:
     from slacrs import Slacrs
-    from slacrs.model import Input
+    from slacrs.model import Input, InputTag
 except ImportError as ex:
     Slacrs = None
 
+
 class Seed:
-    def __init__(self, seed: Input, id):
+    def __init__(self, seed: Input, id: int):
         self.created_at = seed.created_at
-        self.tags = [x.value for x in seed.tags]
-        self.value = seed.value
-        self.id = hex(id)[2:].rjust(8, "0")
-    # def __init__(self, created, tags, value, id):
-    #     self.created_at = created
-    #     self.tags = tags
-    #     self.value = value
-    #     self.id = hex(id)[2:].rjust(8, "0")
-
-
+        self.tags: List[str] = [x.value for x in seed.tags]
+        self.value: bytes = seed.value
+        self.id: str = hex(id)[2:].rjust(8, "0")
 
 class SeedTable:
     """
@@ -80,34 +74,31 @@ class SeedTable:
             for _ in range(new_event_count):
                 e = self.slacrs_instance.event_queue.get_nowait()
                 session = self.slacrs_instance.session()
-                obj = e.get_object(session)
-                if isinstance(obj, Input) and obj.target_image_id == self.connector.target_image_id:
-                    seed = Seed(obj)
-                    self.seed_callback(seed)
+                if e.kind == "input":
+                    obj = e.get_object(session)
+                    if session.query(Input).filter_by(id=e.object_id).filter_by(target_image_id=self.connector.target_image_id) == 1:
+                        seed = session.query(Input).filter_by(obj.object_id).one()
+                        self.seed_callback(seed)
+                session.close()
 
-    def get_all_seeds(self):
-        #BEGIN TESTING CODE
-        # from string import ascii_letters
-        # import random
-        # seed_types = [
-        #     "non-crashing",
-        #     "crashing",
-        #     "leaking",
-        #     "non-terminating",
-        #     "exploit",
-        # ]
-        # seeds = []
-        # for i in range(1000):
-        #     seeds.append(Seed("date", random.choices(seed_types,k=random.randint(1,5)), "".join(random.choices(ascii_letters, k=random.randint(1000,2000))), self.current_seed_id))
-        #     self.current_seed_id += 1 #TODO: fix this count always increasing,
-        # return seeds
-        #END TESTING CODE
-
+    def filter_seeds_by_tag(self, tags: List[str]=[]) -> List[Seed]:
         session = self.slacrs_instance.session()
         seeds: List[Seed] = []
         if session:
-            result = session.query(Input).filter_by(target_image_id=self.connector.target_image_id).all()
-            seeds = sorted([Seed(x) for x in result], key=lambda x: x.created_at)
+            result = session.query(Input).join(Input.tags)
+            for tag in tags:
+                result = result.filter(Input.tags.any(InputTag.value == tag))
+            result = result.order_by(Input.created_at).all()
+            seeds = [Seed(inp, idx) for idx, inp in enumerate(result)]
+        return seeds
+
+    def get_all_seeds(self, filter=None):
+        session = self.slacrs_instance.session()
+        seeds: List[Seed] = []
+        if session:
+            result = session.query(Input).filter_by(target_image_id=self.connector.target_image_id).order_by(Input.created_at).all()
+            seeds = [Seed(inp, idx) for idx, inp in enumerate(result)]
+            #seeds = list(map(lambda val, i: Seed(val, i), enumerate(result))
             session.close()
         if len(seeds) == 0:
             self.workspace.log("Unable to retrieve seeds for target_image_id: %s" % self.connector.target_image_id)

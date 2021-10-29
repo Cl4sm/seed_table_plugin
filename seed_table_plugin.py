@@ -257,7 +257,6 @@ class SeedTableView(BaseView):
         if self.instance.project.am_none:
             return
         pass
-        #self.table_data.seeds = self.table_data.seed_db.get_all_seeds()
 
     def _on_filter_change(self):
         raw_filter = self.filter_box.text()
@@ -277,7 +276,7 @@ class SeedTableView(BaseView):
             flags.append("exploit")
 
         self.table_data.clear_seeds()
-        data = self.table_data.seed_db.get_all_seeds() #query db here
+        data = self.table_data.seed_db.filter_seeds_by_tag(tags=flags)
         self.table_data.add_seed(data)
 
 
