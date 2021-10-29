@@ -86,7 +86,7 @@ class SeedTableModel(QAbstractTableModel):
         else:
             self.seeds.append(seed)
         # update our page
-        self.max_pages = (len(self.seeds) // self.entries_per_page)
+        self.max_pages = max(len(self.seeds) // self.entries_per_page, 1)
         self.set_page(self.current_page)
         self.page_dropdown.clear()
         self.page_dropdown.addItems(list(map(str, range(1, self.max_pages+1))))
@@ -96,12 +96,13 @@ class SeedTableModel(QAbstractTableModel):
     def clear_seeds(self):
         self.beginResetModel()
         self.seeds = []
-        self.max_pages = (len(self.seeds) // self.entries_per_page)
-        self.set_page(self.current_page)
+        self.displayed_seeds = []
+        self.max_pages = max(len(self.seeds) // self.entries_per_page, 1)
         self.page_dropdown.clear()
         self.page_dropdown.addItems(list(map(str, range(1, self.max_pages+1))))
         self.countlabel.setText("Count: " + str(len(self.seeds)))
         self.endResetModel()
+        self.set_page(1)
 
     def data(self, index, role=Qt.DisplayRole):
         col = index.column()
@@ -217,19 +218,14 @@ class SeedTableView(BaseView):
         # filter checkboxes
         # "NC", "C", "NT", "L", "E"
         self.nc_checkbox = QCheckBox("NC")
-        self.nc_checkbox.setChecked(True)
         self.nc_checkbox.stateChanged.connect(self._on_filter_change)
         self.c_checkbox = QCheckBox("C")
-        self.c_checkbox.setChecked(True)
         self.c_checkbox.stateChanged.connect(self._on_filter_change)
         self.nt_checkbox = QCheckBox("NT")
-        self.nt_checkbox.setChecked(True)
         self.nt_checkbox.stateChanged.connect(self._on_filter_change)
         self.l_checkbox = QCheckBox("L")
-        self.l_checkbox.setChecked(True)
         self.l_checkbox.stateChanged.connect(self._on_filter_change)
         self.e_checkbox = QCheckBox("E")
-        self.e_checkbox.setChecked(True)
         self.e_checkbox.stateChanged.connect(self._on_filter_change)
 
 
@@ -260,6 +256,7 @@ class SeedTableView(BaseView):
 
     def _on_filter_change(self):
         raw_filter = self.filter_box.text()
+        inp = None
         if len(raw_filter) > 0:
             inp, _ = codecs.escape_decode(raw_filter, 'hex')
             print(f"Query: {repr(inp)}")
@@ -275,12 +272,14 @@ class SeedTableView(BaseView):
         if self.e_checkbox.isChecked():
             flags.append("exploit")
 
+        self.seed_count_label.setText("<font color=#ff0000>Querying..</font>")
+        self.seed_count_label.repaint()
         self.table_data.clear_seeds()
-        data = self.table_data.seed_db.filter_seeds_by_tag(tags=flags)
+        if len(flags) == 0 and inp is None:
+            data = self.table_data.seed_db.get_all_seeds()
+        else:
+            data = self.table_data.seed_db.filter_seeds_by_tag(tags=flags)
         self.table_data.add_seed(data)
-
-
-
 
 
 class SeedTableFilterBox(QLineEdit):
@@ -312,5 +311,5 @@ class SeedTablePlugin(BasePlugin):
         workspace.default_tabs += [self.seed_table_view]
         workspace.add_view(self.seed_table_view)
         #TODO: move this
-        self.seed_table_view.table_data.add_seed(self.seed_table_view.table_data.seed_db.get_all_seeds())
+       # self.seed_table_view.table_data.add_seed(self.seed_table_view.table_data.seed_db.get_all_seeds())
 
