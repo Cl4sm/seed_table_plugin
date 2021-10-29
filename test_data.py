@@ -94,7 +94,7 @@ try:
         push_to_db(inp_tag_2)
 
     # Add many large input cases
-    for i in range(200):
+    for i in range(10000):
         inp = Input(value=''.join(random.choices(string.printable, k=10000)).encode(), target_image_id=target_image.id)
         push_to_db(inp)
         for val in random.choices(seed_types, k=random.randint(1,len(seed_types))):

@@ -33,6 +33,7 @@ class SeedTable:
         self.should_exit = False
 
         self.init_instance()
+        self.has_populated_seeds = False
 
         self.slacrs_thread = threading.Thread(target=self.listen_for_events)
         self.slacrs_thread.setDaemon(True)
@@ -69,8 +70,14 @@ class SeedTable:
             sleep(1)
 
         self.seed_callback(self.get_all_seeds())
+        self.has_populated_seeds = True
 
+        prev_target = self.connector.target_image_id
         while not self.should_exit:
+            if self.connector.target_image_id != prev_target:
+                prev_target = self.connector.target_image_id
+                self.seed_callback(self.get_all_seeds())
+
             new_event_count = self.slacrs_instance.fetch_events()
             for _ in range(new_event_count):
                 e = self.slacrs_instance.event_queue.get_nowait()
