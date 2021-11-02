@@ -1,9 +1,14 @@
 import asyncio
+import multiprocessing
+import psycopg2
 import threading
 
 from time import sleep
 from typing import Dict, List
 from tornado.platform.asyncio import AnyThreadEventLoopPolicy
+from sqlalchemy.dialects import postgresql, sqlite
+from sqlalchemy import func, literal
+
 
 try:
     from slacrs import Slacrs
@@ -33,16 +38,17 @@ class SeedTable:
         self.slacrs_instance = None
         self.should_exit = False
         self.query_signal = query_signal
+        self.is_querying = False
 
         self.init_instance()
-        self.has_populated_seeds = False
 
         self.slacrs_thread = threading.Thread(target=self.listen_for_events)
         self.slacrs_thread.setDaemon(True)
         self.slacrs_thread.start()
+        self.query_proc = None
 
 
-    def init_instance(self):
+    def init_instance(self) -> bool:
         self.connector = self.workspace.plugins.get_plugin_instance_by_name("ChessConnector")
 
         if self.connector is None:
@@ -71,14 +77,13 @@ class SeedTable:
         while not self.connector.target_image_id:
             sleep(1)
 
-        self.seed_callback(self.get_all_seeds())
-        self.has_populated_seeds = True
+        self.seed_callback(self.get_seeds())
 
         prev_target = self.connector.target_image_id
         while not self.should_exit:
             if self.connector.target_image_id != prev_target:
                 prev_target = self.connector.target_image_id
-                self.seed_callback(self.get_all_seeds())
+                self.seed_callback(self.get_seeds())
 
             new_event_count = self.slacrs_instance.fetch_events()
             for _ in range(new_event_count):
@@ -91,40 +96,29 @@ class SeedTable:
                         self.seed_callback(seed)
                 session.close()
 
-    def filter_seeds_by_value(self, value: bytes):
-        self.query_signal.querySignal.emit(True)
+    def get_seeds(self, inp=None, tags=[], offset=0, size=50):
+        if not self.slacrs_instance:
+            return
+
         session = self.slacrs_instance.session()
+        self.query_signal.querySignal.emit(True)
         seeds: List[Seed] = []
         if session:
-            query = str(session.query(Input.id))
-            query += f"\nWHERE POSITION('\\x{value.hex()}'::bytea in input.value) != 0\nORDER BY input.created_at"
-            result = session.execute(query)
-            seeds = [Seed(session.query(Input).filter_by(id=s_id[0]).first(), idx) for idx, s_id in enumerate(result)]
+            query = session.query(Input)
+
+            if inp:
+                if isinstance(session.bind.dialect, postgresql.dialect):
+                    query = query.filter(func.POSITION(literal(inp).op('in')(Input.value)) != 0)
+                elif isinstance(session.bind.dialect, sqlite.dialect):
+                    pass
+
+            if tags:
+                query = query.join(Input.tags)
+                for tag in tags:
+                    query = query.filter(Input.tags.any(InputTag.value == tag))
+
+            result = query.order_by(Input.created_at).limit(size).offset(offset)
+            seeds = [Seed(seed, idx) for idx, seed in enumerate(result)]
             session.close()
-        return seeds
-
-    def filter_seeds_by_tag(self, tags: List[str]=[]) -> List[Seed]:
-        self.query_signal.querySignal.emit(True)
-        session = self.slacrs_instance.session()
-        seeds: List[Seed] = []
-        if session:
-            result = session.query(Input).join(Input.tags)
-            for tag in tags:
-                result = result.filter(Input.tags.any(InputTag.value == tag))
-            result = result.order_by(Input.created_at).all()
-            seeds = [Seed(inp, idx) for idx, inp in enumerate(result)]
-        return seeds
-
-    def get_all_seeds(self, filter=None):
-        self.query_signal.querySignal.emit(True)
-        session = self.slacrs_instance.session()
-        seeds: List[Seed] = []
-        if session:
-            result = session.query(Input).filter_by(target_image_id=self.connector.target_image_id).order_by(Input.created_at).all()
-            seeds = [Seed(inp, idx) for idx, inp in enumerate(result)]
-            #seeds = list(map(lambda val, i: Seed(val, i), enumerate(result))
-            session.close()
-        if len(seeds) == 0:
-            self.workspace.log("Unable to retrieve seeds for target_image_id: %s" % self.connector.target_image_id)
-
-        return seeds
+            self.seed_callback(seeds)
+            self.is_querying = False

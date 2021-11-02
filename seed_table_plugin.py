@@ -38,6 +38,8 @@ class SeedTableModel(QAbstractTableModel):
         self.page_dropdown = dropdown
         self.headers = ["ID", "Input", "NC", "C", "NT", "L", "E"]
         self.seeds = []
+        self.inp = None
+        self.tags = None
         self.displayed_seeds = []
 
         # pagination support
@@ -72,6 +74,7 @@ class SeedTableModel(QAbstractTableModel):
 
     def set_page(self, pagenum):
         self.beginResetModel()
+        page_changed = self.current_page != pagenum
         if self.max_pages >= pagenum > 0:
             self.current_page = pagenum
         else:
@@ -84,6 +87,8 @@ class SeedTableModel(QAbstractTableModel):
             print("ERROR: Invalid page selected.")
             return False
         self.displayed_seeds = self.seeds[min_index:max_index]
+        if page_changed:
+            self.seed_db.get_seeds(inp=self.inp, tags=self.tags, offset=min_index, size=self.entries_per_page)
         self.endResetModel()
         return True
 
@@ -285,33 +290,26 @@ class SeedTableView(BaseView):
 
     def _on_filter_change(self):
         raw_filter = self.filter_box.text()
-        inp = None
+        self.inp = None
         if len(raw_filter) > 0:
-            inp, _ = codecs.escape_decode(raw_filter, 'hex')
-            print(f"Query: {repr(inp)}")
-        flags = []
+            self.inp, _ = codecs.escape_decode(raw_filter, 'hex')
+        self.tags = []
         if self.nc_checkbox.isChecked():
-            flags.append("non-crashing")
+            self.tags.append("non-crashing")
         if self.c_checkbox.isChecked():
-            flags.append("crashing")
+            self.tags.append("crashing")
         if self.l_checkbox.isChecked():
-            flags.append("leaking")
+            self.tags.append("leaking")
         if self.nt_checkbox.isChecked():
-            flags.append("non-terminating")
+            self.tags.append("non-terminating")
         if self.e_checkbox.isChecked():
-            flags.append("exploit")
+            self.tags.append("exploit")
 
         self.table_data.clear_seeds()
-        if len(flags) == 0 and inp is None:
-            data = self.table_data.seed_db.get_all_seeds()
-        else:
-            if inp:
-                data = self.table_data.seed_db.filter_seeds_by_value(inp)
-                data = list(filter(lambda s: all([x in s.tags for x in flags]), data))
-            else:
-                data = self.table_data.seed_db.filter_seeds_by_tag(tags=flags)
-        self.table_data.add_seed(data)
-
+        data = self.table_data.seed_db.get_seeds(inp=self.inp,
+                                                 tags=self.tags,
+                                                 offset=self.table_data.entries_per_page*(self.table_data.current_page-1),
+                                                 size=self.table_data.entries_per_page)
 
 class SeedTableFilterBox(QLineEdit):
     def __init__(self, parent):
