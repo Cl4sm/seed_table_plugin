@@ -18,6 +18,8 @@ from PySide2.QtWidgets import (
 from angrmanagement.plugins import BasePlugin
 from angrmanagement.ui.views import BaseView
 from angrmanagement.ui.workspace import Workspace
+from math import ceil
+from collections import defaultdict
 import codecs
 
 from .seed_table import SeedTable
@@ -37,10 +39,10 @@ class SeedTableModel(QAbstractTableModel):
         self.workspace = workspace
         self.page_dropdown = dropdown
         self.headers = ["ID", "Input", "NC", "C", "NT", "L", "E"]
-        self.seeds = []
+        #self.seeds = []
+        self.pages = defaultdict(list)
         self.inp = None
         self.tags = None
-        self.displayed_seeds = []
 
         # pagination support
         self.current_page = 1
@@ -50,9 +52,9 @@ class SeedTableModel(QAbstractTableModel):
         self.set_page(1)
 
     def rowCount(self, index=QModelIndex()):
-        if not self.displayed_seeds:
+        if self.current_page not in self.pages:
             return 0
-        return len(self.displayed_seeds)
+        return len(self.pages[self.current_page])
 
     def columnCount(self, index=QModelIndex()):
         return len(self.headers)
@@ -81,47 +83,50 @@ class SeedTableModel(QAbstractTableModel):
             return False
         # load seeds for page
         min_index = (pagenum - 1) * self.entries_per_page
-        max_index = min((pagenum * self.entries_per_page) - 1, len(self.seeds))
         # check to ensure we arent out of bounds
-        if min_index > len(self.seeds):  # this should REALLY never happen.
-            print("ERROR: Invalid page selected.")
-            return False
-        self.displayed_seeds = self.seeds[min_index:max_index]
         if page_changed:
-            self.seed_db.get_seeds(inp=self.inp, tags=self.tags, offset=min_index, size=self.entries_per_page)
+            self.seed_db.get_seeds(inp=self.inp, tags=self.tags, offset=min_index, size=self.entries_per_page, page_no=self.current_page)
         self.endResetModel()
         return True
 
-    def add_seed(self, seed):
+    def add_seed(self, seed, count=None, page_no=None):
         self.beginResetModel()
         # more complex logic here.. probably
+        page = page_no if page_no else self.current_page
         if isinstance(seed, list):
-            for s in seed:
-                self.seeds.append(s)
+            cur_len = len(self.pages[page])
+            seed_list = seed if len(seed) + cur_len < self.entries_per_page else seed[:self.entries_per_page-cur_len]
+            self.pages[page].extend(seed_list)
+            #self.seeds.extend(seed if len(seed) + cur_len < self.entries_per_page else seed[:self.entries_per_page-cur_len])
         else:
-            self.seeds.append(seed)
+            if len(self.pages[page]) < self.entries_per_page:
+                self.pages[page].append(seed)
+            else:
+                self.max_pages += 1
+                self.pages[page+1].append(seed)
+
         # update our page
-        self.max_pages = max(len(self.seeds) // self.entries_per_page, 1)
+        if count:
+            self.max_pages = max(ceil(count / self.entries_per_page), 1)
         self.set_page(self.current_page)
         self.page_dropdown.clear()
         self.page_dropdown.addItems(list(map(str, range(1, self.max_pages+1))))
-        self.countlabel.setText("Count: " + str(len(self.seeds)))
+        self.countlabel.setText(f"Count: {count}")
         self.endResetModel()
 
     def clear_seeds(self):
         self.beginResetModel()
-        self.seeds = []
-        self.displayed_seeds = []
-        self.max_pages = max(len(self.seeds) // self.entries_per_page, 1)
+        self.pages = defaultdict(list)
+        self.max_pages = 1
         self.page_dropdown.clear()
-        self.page_dropdown.addItems(list(map(str, range(1, self.max_pages+1))))
-        self.countlabel.setText("Count: " + str(len(self.seeds)))
+        self.page_dropdown.addItems(["1"])
+        self.countlabel.setText("Count: 0")
         self.endResetModel()
         self.set_page(1)
 
     def data(self, index, role=Qt.DisplayRole):
         col = index.column()
-        seed = self.displayed_seeds[index.row()]
+        seed = self.pages[self.current_page][index.row()]
         if role == Qt.DisplayRole:
             if col == 0:
                 return seed.id
@@ -188,7 +193,7 @@ class SeedTableWidget(QTableView):
             self.saveSeed(rows)
 
     def saveSeed(self, rows):
-        data = self.model().displayed_seeds[rows[0].row()].value
+        data = self.model().page[rows[0].row()].value
         options = QFileDialog.Options()
         options |= QFileDialog.DontUseNativeDialog
         filename = QFileDialog.getSaveFileName(self, "Save Seed", "", "All Files(*)", options=options)[0]

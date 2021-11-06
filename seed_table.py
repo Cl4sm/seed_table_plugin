@@ -1,5 +1,5 @@
 import asyncio
-import multiprocessing
+import ctypes
 import psycopg2
 import threading
 
@@ -25,6 +25,60 @@ class Seed:
         self._realid = seed.id
         self.id: str = hex(id)[2:].rjust(8, "0")
 
+class SeedQueryThread(threading.Thread):
+    def __init__(self, instance, inp, tags, offset, size, page_no, seed_callback):
+        threading.Thread.__init__(self)
+        self.instance = instance
+        self.inp = inp
+        self.tags = tags
+        self.offset = offset
+        self.size = size
+        self.page_no = page_no
+        self.seed_callback = seed_callback
+
+    def run(self):
+        try:
+            session = self.instance.session()
+            self.query_seeds(session, self.inp, self.tags, self.offset, self.size)
+        except Exception as e:
+            conn = session.connection()
+            conn.connection.cancel()
+            session.close()
+
+    def get_id(self):
+        if hasattr(self, '_thread_id'):
+            return self._thread_id
+        for id, thread in threading._active.items():
+            if thread is self:
+                return id
+
+    def kill_query(self):
+        thread_id = self.get_id()
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(thread_id,
+              ctypes.py_object(SystemExit))
+
+    def query_seeds(self, session, inp: bytes, tags: List[str], offset: int, size: int):
+        seeds: List[Seed] = []
+        if session:
+            query = session.query(Input, func.count(Input.id).over().label('total'))
+
+            if inp:
+                if isinstance(session.bind.dialect, postgresql.dialect):
+                    query = query.filter(func.POSITION(literal(inp).op('in')(Input.value)) != 0)
+                elif isinstance(session.bind.dialect, sqlite.dialect):
+                    pass
+
+            if tags:
+                query = query.join(Input.tags)
+                for tag in tags:
+                    query = query.filter(Input.tags.any(InputTag.value == tag))
+
+            result = query.order_by(Input.created_at).limit(size).offset(offset).all()
+            count = result[0][1] if len(result) > 0 else 0
+            seeds = [Seed(seed[0], idx) for idx, seed in enumerate(result)]
+            session.close()
+            self.seed_callback(seeds, count=count, page_no=self.page_no)
+
 class SeedTable:
     """
     Multiple POIs
@@ -45,7 +99,7 @@ class SeedTable:
         self.slacrs_thread = threading.Thread(target=self.listen_for_events)
         self.slacrs_thread.setDaemon(True)
         self.slacrs_thread.start()
-        self.query_proc = None
+        self.query_thread = None
 
 
     def init_instance(self) -> bool:
@@ -77,13 +131,15 @@ class SeedTable:
         while not self.connector.target_image_id:
             sleep(1)
 
-        self.seed_callback(self.get_seeds())
+        self.get_seeds()
+        self.query_thread.join()
 
         prev_target = self.connector.target_image_id
         while not self.should_exit:
             if self.connector.target_image_id != prev_target:
                 prev_target = self.connector.target_image_id
-                self.seed_callback(self.get_seeds())
+                self.get_seeds()
+                self.query_thread.join()
 
             new_event_count = self.slacrs_instance.fetch_events()
             for _ in range(new_event_count):
@@ -96,29 +152,14 @@ class SeedTable:
                         self.seed_callback(seed)
                 session.close()
 
-    def get_seeds(self, inp=None, tags=[], offset=0, size=50):
+    def get_seeds(self, inp=None, tags=[], offset=0, size=50, page_no=None):
         if not self.slacrs_instance:
             return
 
-        session = self.slacrs_instance.session()
+        if self.query_thread and self.query_thread.is_alive():
+            self.query_thread.kill_query()
+
         self.query_signal.querySignal.emit(True)
-        seeds: List[Seed] = []
-        if session:
-            query = session.query(Input)
-
-            if inp:
-                if isinstance(session.bind.dialect, postgresql.dialect):
-                    query = query.filter(func.POSITION(literal(inp).op('in')(Input.value)) != 0)
-                elif isinstance(session.bind.dialect, sqlite.dialect):
-                    pass
-
-            if tags:
-                query = query.join(Input.tags)
-                for tag in tags:
-                    query = query.filter(Input.tags.any(InputTag.value == tag))
-
-            result = query.order_by(Input.created_at).limit(size).offset(offset)
-            seeds = [Seed(seed, idx) for idx, seed in enumerate(result)]
-            session.close()
-            self.seed_callback(seeds)
-            self.is_querying = False
+        self.query_thread = SeedQueryThread(self.slacrs_instance, inp, tags, offset, size, page_no, self.seed_callback)
+        self.query_thread.setDaemon(True)
+        self.query_thread.start()
